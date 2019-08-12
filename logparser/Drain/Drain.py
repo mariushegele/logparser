@@ -245,14 +245,17 @@ class LogParser:
             self.printTree(node.childD[child], dep+1)
 
 
-    def parse(self, logName):
+    def parse(self, logName, input_df=None):
         print('Parsing file: ' + os.path.join(self.path, logName))
         start_time = datetime.now()
         self.logName = logName
         rootNode = Node()
         logCluL = []
-
-        self.load_data()
+        
+        if input_df is not None:
+            self.df_log = input_df
+        else:
+            self.load_data()
 
         count = 0
         for idx, line in self.df_log.iterrows():
@@ -275,7 +278,7 @@ class LogParser:
                     matchCluster.logTemplate = newTemplate
 
             count += 1
-            if count % 1000 == 0 or count == len(self.df_log):
+            if count % 10000 == 0 or count == len(self.df_log):
                 print('Processed {0:.1f}% of log lines.'.format(count * 100.0 / len(self.df_log)))
 
 
@@ -300,7 +303,7 @@ class LogParser:
         """
         log_messages = []
         linecount = 0
-        with open(log_file, 'r') as fin:
+        with open(log_file, 'r', encoding="utf8", errors='replace') as fin:
             for line in fin.readlines():
                 try:
                     match = regex.search(line.strip())
@@ -333,11 +336,15 @@ class LogParser:
         return headers, regex
 
     def get_parameter_list(self, row):
-        template_regex = re.sub(r"<.{1,5}>", "<*>", row["EventTemplate"])
+ #       print(row['EventTemplate'])
+        template_regex = row['EventTemplate']
+#        template_regex = re.sub(r"<.{1,5}>", "<*>", row["EventTemplate"])
         if "<*>" not in template_regex: return []
-        template_regex = re.sub(r'([^A-Za-z0-9])', r'\\\1', template_regex)
-        template_regex = re.sub(r'\\ +', r'\s+', template_regex)
-        template_regex = "^" + template_regex.replace("\<\*\>", "(.*?)") + "$"
+        template_regex = re.sub(r'([^A-Za-z0-9\<\>\*])', r'\\\1', template_regex) # escape non-ascii
+#       template_regex = re.sub(r'\\ +', r'\\\\s+', template_regex)
+
+        template_regex = "^" + re.sub(r'\<\*\>', r'(.*?)', template_regex) + "$"
+       
         parameter_list = re.findall(template_regex, row["Content"])
         parameter_list = parameter_list[0] if parameter_list else ()
         parameter_list = list(parameter_list) if isinstance(parameter_list, tuple) else [parameter_list]

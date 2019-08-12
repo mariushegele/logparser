@@ -38,7 +38,7 @@ def SLCT(para, log_format, rex):
     logname = os.path.join(para['dataPath'], para['dataName'])
     print("Parsing file: {}".format(logname))
 
-    # SLCT compilation
+    # SLCT compilation^
     if not os.path.isfile('../SLCT/slct'):
         try:
             print('Compile SLCT...\n>> gcc -o ../logparser/SLCT/slct -O2 ../logparser/SLCT/cslct.c')
@@ -49,7 +49,9 @@ def SLCT(para, log_format, rex):
             raise
 
     headers, regex = generate_logformat_regex(log_format)
+    print('Generated regex: ', regex)
     df_log = log_to_dataframe(logname, regex, headers, log_format)
+
 
     # Generate input file
     with open('slct_input.log', 'w') as fw:
@@ -112,7 +114,7 @@ def log_to_dataframe(log_file, regex, headers, logformat):
     ''' Function to transform log file to dataframe '''
     log_messages = []
     linecount = 0
-    with open(log_file, 'r') as fin:
+    with open(log_file, 'r', encoding='utf-8', errors='replace') as fin:
         for line in fin.readlines():
             try:
                 match = regex.search(line.strip())
@@ -130,17 +132,20 @@ def generate_logformat_regex(logformat):
     ''' 
     Function to generate regular expression to split log messages
     '''
+    print("Input log format: " + logformat)
     headers = []
-    splitters = re.split(r'(<[^<>]+>)', logformat)
+    splitters = re.split('(<[^<>]+>)', logformat)
     regex = ''
+    print("Splitters: " + str(splitters))
     for k in range(len(splitters)):
         if k % 2 == 0:
-            splitter = re.sub(' +', '\s+', splitters[k])
+            splitter = re.sub(' +', '\\\\s+', splitters[k])
             regex += splitter
         else:
             header = splitters[k].strip('<').strip('>')
             regex += '(?P<%s>.*?)' % header
             headers.append(header)
+    print('Regex: ' + regex)
     regex = re.compile('^' + regex + '$')
     return headers, regex
 

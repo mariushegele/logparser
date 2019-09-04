@@ -12,6 +12,7 @@ import hashlib
 from datetime import datetime
 
 
+
 class Logcluster:
     def __init__(self, logTemplate='', logIDL=None):
         self.logTemplate = logTemplate
@@ -193,7 +194,15 @@ class LogParser:
             i += 1
 
         return retVal
-
+    
+    def map_param_list(self, parameter_list):
+        parameter_list = parameter_list[0] if parameter_list else ()
+        if isinstance(parameter_list, tuple):
+            parameter_list = list(parameter_list)
+        else:
+            parameter_list = [parameter_list]
+        return parameter_list
+    
     def outputResult(self, logClustL):
         log_templates = [0] * self.df_log.shape[0]
         log_templateids = [0] * self.df_log.shape[0]
@@ -213,7 +222,25 @@ class LogParser:
         self.df_log['EventTemplate'] = log_templates
 
         if self.keep_para:
-            self.df_log["ParameterList"] = self.df_log.apply(self.get_parameter_list, axis=1) 
+            
+            self.df_log['params'] = self.df_log['EventTemplate'].str.contains('<*>', regex=False)
+            self.df_log['EventRegex'] = ""
+            self.df_log['ParameterList'] = ""
+            
+            has_params = self.df_log[self.df_log['params']].copy()
+            has_params['EventRegex'] = has_params['EventTemplate']
+            has_params['EventRegex'] = has_params['EventRegex'].str.replace(r'([^A-Za-z0-9 ])', r'\\\1')
+            has_params['EventRegex'] = '^' + has_params['EventRegex'].str.replace(r'\\\<\\\*\\\>', r'(.*?)') + '$'
+            
+            has_params['ParameterList'] = has_params.apply(
+                lambda row: re.findall(row['EventRegex'], row['Content']),
+                axis=1
+            )
+                
+            has_params['ParameterList'] = has_params['ParameterList'].map(self.map_param_list) 
+            
+            self.df_log.loc[has_params.index] = has_params
+
         self.df_log.to_csv(os.path.join(self.savePath, self.logName + '_structured.csv'), index=False)
 
 
@@ -278,7 +305,7 @@ class LogParser:
                     matchCluster.logTemplate = newTemplate
 
             count += 1
-            if count % 10000 == 0 or count == len(self.df_log):
+            if count % 5000 == 0 or count == len(self.df_log):
                 print('Processed {0:.1f}% of log lines.'.format(count * 100.0 / len(self.df_log)))
 
 
@@ -335,16 +362,20 @@ class LogParser:
         regex = re.compile('^' + regex + '$')
         return headers, regex
 
+    
     def get_parameter_list(self, row):
- #       print(row['EventTemplate'])
+#        print(row['EventTemplate'])
         template_regex = row['EventTemplate']
+        
 #        template_regex = re.sub(r"<.{1,5}>", "<*>", row["EventTemplate"])
-        if "<*>" not in template_regex: return []
-        template_regex = re.sub(r'([^A-Za-z0-9\<\>\*])', r'\\\1', template_regex) # escape non-ascii
+        if "<*>" not in template_regex:
+            return []
+        template_regex = re.sub(r'([^A-Za-z0-9\<\>\* ])', r'\\\1', template_regex) # escape non-ascii
 #       template_regex = re.sub(r'\\ +', r'\\\\s+', template_regex)
-
+ #       print(template_regex)
         template_regex = "^" + re.sub(r'\<\*\>', r'(.*?)', template_regex) + "$"
-       
+ #       print(template_regex)
+ #       print(row['Content'])
         parameter_list = re.findall(template_regex, row["Content"])
         parameter_list = parameter_list[0] if parameter_list else ()
         parameter_list = list(parameter_list) if isinstance(parameter_list, tuple) else [parameter_list]

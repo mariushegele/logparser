@@ -182,7 +182,14 @@ class LogParser:
                 else:
                     matchedNode.templateNo -= 1
                     parentn = matchedNode
-
+                    
+    def map_param_list(self, parameter_list):
+        parameter_list = parameter_list[0] if parameter_list else ()
+        if isinstance(parameter_list, tuple):
+            parameter_list = list(parameter_list)
+        else:
+            parameter_list = [parameter_list]
+        return parameter_list   
 
     def outputResult(self, logClustL):
         
@@ -203,7 +210,24 @@ class LogParser:
         self.df_log['EventId'] = ids
         self.df_log['EventTemplate'] = templates
         if self.keep_para:
-            self.df_log["ParameterList"] = self.df_log.apply(self.get_parameter_list, axis=1) 
+            self.df_log['params'] = self.df_log['EventTemplate'].str.contains('<*>', regex=False)
+            self.df_log['EventRegex'] = ""
+            self.df_log['ParameterList'] = ""
+            
+            has_params = self.df_log[self.df_log['params']].copy()
+            has_params['EventRegex'] = has_params['EventTemplate']
+            has_params['EventRegex'] = has_params['EventRegex'].str.replace(r'([^A-Za-z0-9 ])', r'\\\1')
+            has_params['EventRegex'] = '^' + has_params['EventRegex'].str.replace(r'\\\<\\\*\\\>', r'(.*?)') + '$'
+
+            has_params['ParameterList'] = has_params.apply(
+                lambda row: re.findall(row['EventRegex'], row['Content']),
+                axis=1
+            )
+                
+            has_params['ParameterList'] = has_params['ParameterList'].map(self.map_param_list) 
+            
+            self.df_log.loc[has_params.index] = has_params
+            
         self.df_log.to_csv(os.path.join(self.savePath, self.logname + '_structured.csv'), index=False)
         df_event.to_csv(os.path.join(self.savePath, self.logname + '_templates.csv'), index=False)
 
@@ -224,13 +248,19 @@ class LogParser:
             self.printTree(node.childD[child], dep + 1)
 
 
-    def parse(self, logname):
+    def parse(self, logname, input_df=None):
         starttime = datetime.now()  
         print('Parsing file: ' + os.path.join(self.path, logname))
         self.logname = logname  
         self.load_data()
         rootNode = Node()
         logCluL = []
+        
+        if input_df is not None:
+            self.df_log = input_df
+        else:
+            self.load_data()
+
 
         count = 0
         for idx, line in self.df_log.iterrows():
@@ -263,7 +293,7 @@ class LogParser:
             if matchCluster:
                 matchCluster.logIDL.append(logID)
             count += 1
-            if count % 1000 == 0 or count == len(self.df_log):
+            if count % 10000 == 0 or count == len(self.df_log):
                 print('Processed {0:.1f}% of log lines.'.format(count * 100.0 / len(self.df_log)))
             
         if not os.path.exists(self.savePath):
@@ -309,7 +339,7 @@ class LogParser:
         regex = ''
         for k in range(len(splitters)):
             if k % 2 == 0:
-                splitter = re.sub(' +', '\s+', splitters[k])
+                splitter = re.sub(' +', '\\\\s+', splitters[k])
                 regex += splitter
             else:
                 header = splitters[k].strip('<').strip('>')
@@ -319,6 +349,7 @@ class LogParser:
         return headers, regex
 
     def get_parameter_list(self, row):
+        print(row)
         template_regex = re.sub(r"\s<.{1,5}>\s", "<*>", row["EventTemplate"])
         if "<*>" not in template_regex: return []
         template_regex = re.sub(r'([^A-Za-z0-9])', r'\\\1', template_regex)
